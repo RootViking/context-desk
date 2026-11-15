@@ -36,7 +36,7 @@ import type { FedPressItem, FomcMeeting } from "@/domain/fed-parse";
 import { ADVISORY_LIMITS, BOLLINGER_ADAPTATION, TC2000_BOUNDARY } from "@/domain/limits";
 import type { NewsDraft } from "@/domain/news";
 import { checklistFor, fundamentalsFor, optionFor } from "@/domain/state";
-import { describeSession, isSessionDate } from "@/domain/time";
+import { describeSession, formatInstantEt, isSessionDate } from "@/domain/time";
 import { instrumentFor } from "@/domain/watchlist";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { ChecklistRail } from "@/components/checklist-rail";
@@ -50,7 +50,11 @@ import { useTicker } from "@/components/use-ticker";
 import { useWorkspace } from "@/components/use-workspace";
 import { useXStatus } from "@/components/use-x";
 import { WatchlistBar } from "@/components/watchlist-bar";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { readDirection } from "@/domain/direction";
+import { LIVE_NOTE } from "@/domain/session-clock";
+import { useAlertSound } from "@/components/use-alert-sound";
+import { useLive, type LiveState } from "@/components/use-live";
 import { candlesToBarObservations, type Timeframe } from "@/domain/bars";
 import { ChainPanel } from "@/components/chain-panel";
 import { DirectionPanel } from "@/components/direction-panel";
@@ -72,6 +76,27 @@ export function Desk() {
   const chain = useChain(state?.selectedSymbol ?? "TSLA", chainOpen);
   const [timeframe, setTimeframe] = useState<Timeframe>("15m");
   const [loadingTape, setLoadingTape] = useState(false);
+  const tapeLoader = useRef<((quiet: boolean) => Promise<void>) | null>(null);
+  const tickCount = useRef(0);
+  const liveSymbol = state?.selectedSymbol ?? "TSLA";
+  const { live, setOn: setLiveOn, refreshNow } = useLive(() => {
+    tickCount.current += 1;
+    bars.refresh();
+    if (live.phase === "regular" || live.phase === "pre") void tapeLoader.current?.(true);
+    if (chainOpen && tickCount.current % 3 === 0) chain.refresh();
+  }, liveSymbol);
+  const sound = useAlertSound();
+  const [alert, setAlert] = useState<{ symbol: string; trigger: "call" | "put"; at: string } | null>(null);
+  const entryTrigger = readDirection(bars.candles).entry.trigger;
+  const lastTrigger = useRef<{ symbol: string; trigger: "call" | "put" | null }>({ symbol: liveSymbol, trigger: null });
+  useEffect(() => {
+    const prev = lastTrigger.current;
+    if (prev.symbol === liveSymbol && prev.trigger === null && entryTrigger !== null) {
+      setAlert({ symbol: liveSymbol, trigger: entryTrigger, at: new Date().toISOString() });
+      sound.play();
+    }
+    lastTrigger.current = { symbol: liveSymbol, trigger: entryTrigger };
+  }, [entryTrigger, liveSymbol, sound]);
 
   if (!ready || !state || !now || !sessionDate) {
     return (
@@ -157,8 +182,9 @@ export function Desk() {
     );
   }
 
-  async function loadTapeBars() {
+  async function loadTapeBars(quiet = false) {
     const members = [...new Set(["SPY", "QQQ", "NVDA", symbol])];
+    if (loadingTape) return;
     setLoadingTape(true);
     try {
       const loads = await Promise.allSettled(members.map((member) => fetchBars(member, "15m")));
@@ -176,12 +202,16 @@ export function Desk() {
       const errors = loads.flatMap((load, index) =>
         load.status === "rejected" ? [`${members[index]}: ${load.reason instanceof Error ? load.reason.message : "failed"}`] : load.value.state === "error" ? [`${members[index]}: ${load.value.error}`] : [],
       );
-      if (rows.length === 0) workspace.setNotice(errors.join(" ") || "No bars came back.");
+      if (rows.length === 0) {
+        if (!quiet) workspace.setNotice(errors.join(" ") || "No bars came back.");
+      } else if (quiet) workspace.apply(importParticipationBars(workspaceState, { bars: rows }), workspace.notice ?? undefined);
       else workspace.apply(importParticipationBars(workspaceState, { bars: rows }), `${rows.length} delayed 15-minute bars loaded for ${members.join(", ")}. Typed bars with the same window were replaced.${errors.length ? ` ${errors.join(" ")}` : ""}`);
     } finally {
       setLoadingTape(false);
     }
   }
+
+  tapeLoader.current = loadTapeBars;
 
   return (
     <>
@@ -203,6 +233,12 @@ export function Desk() {
           )
         }
         help={<HelpCopy />}
+        live={live}
+        liveRetrievedAt={bars.retrievedAt}
+        onLiveToggle={() => setLiveOn(!live.on)}
+        onRefreshNow={refreshNow}
+        soundOn={sound.enabled}
+        onSoundToggle={sound.toggle}
         contract={
           <OptionsPanel
             symbol={symbol}
@@ -256,6 +292,16 @@ export function Desk() {
           </>
         }
       />
+      {alert ? (
+        <div className="entry-banner" role="alert">
+          <div className="band">
+            <p>
+              <strong>{alert.symbol} · your 15-minute entry conditions are present for a {alert.trigger.toUpperCase()}</strong> · {formatInstantEt(alert.at)}. Delayed bars. Confirm the bands, averages, and candle in TC2000. Noticia mata estrategia: check Fed and earnings first. This is not an order.
+            </p>
+            <Button type="button" variant="outline" onClick={() => setAlert(null)}>Dismiss</Button>
+          </div>
+        </div>
+      ) : null}
       {state.demo ? (
         <div className="demo-banner" role="status">
           <p>{DEMO_BANNER}</p>
@@ -388,6 +434,12 @@ function Mast({
   help,
   sources,
   contract,
+  live,
+  liveRetrievedAt,
+  onLiveToggle,
+  onRefreshNow,
+  soundOn,
+  onSoundToggle,
 }: {
   sessionDate: string;
   nowLabel: string;
@@ -396,6 +448,12 @@ function Mast({
   help?: ReactNode;
   sources?: ReactNode;
   contract?: ReactNode;
+  live?: LiveState;
+  liveRetrievedAt?: string | null;
+  onLiveToggle?: () => void;
+  onRefreshNow?: () => void;
+  soundOn?: boolean;
+  onSoundToggle?: () => void;
 }) {
   return (
     <header className="mast">
@@ -405,6 +463,14 @@ function Mast({
             <p className="eyebrow">Unpublished local draft</p>
             <h1>Context desk</h1>
             {nowLabel ? <p className="now-line">Eastern now {nowLabel}</p> : null}
+            {live ? (
+              <p className="live-line mono" title={LIVE_NOTE}>
+                <span className={live.on ? `live-dot live-${live.phase}` : "live-dot live-paused"} aria-hidden="true">●</span>{" "}
+                {live.on ? `Live · ${live.phase} · every ${Math.round(live.intervalMs / 1000)}s · next in ${live.nextInSeconds}s` : "Paused"}
+                {liveRetrievedAt ? ` · bars read ${formatInstantEt(liveRetrievedAt)}` : ""}
+                {" · delayed source"}
+              </p>
+            ) : null}
           </div>
           {sessionDate ? (
             <div className="session-controls">
@@ -414,6 +480,17 @@ function Mast({
               </label>
               <Button type="button" variant="outline" onClick={() => onSession("")}>Today (ET)</Button>
               {onReset ? <ResetControl sessionDate={sessionDate} onReset={onReset} /> : null}
+              {live && onLiveToggle ? (
+                <Button type="button" variant={live.on ? "default" : "outline"} onClick={onLiveToggle} aria-pressed={live.on}>
+                  {live.on ? "Live on" : "Live off"}
+                </Button>
+              ) : null}
+              {live && onRefreshNow ? <Button type="button" variant="outline" onClick={onRefreshNow}>Refresh now</Button> : null}
+              {onSoundToggle ? (
+                <Button type="button" variant={soundOn ? "default" : "outline"} onClick={onSoundToggle} aria-pressed={!!soundOn}>
+                  {soundOn ? "Sound on" : "Sound off"}
+                </Button>
+              ) : null}
               {help ? <Drawer label="Help" title="How the marks work">{help}</Drawer> : null}
               {sources ? <Drawer label="Sources" title="Sources, calendar, and company notes" wide>{sources}</Drawer> : null}
               {contract ? <Drawer label="Contract" title="Exact contract, after the look" wide>{contract}</Drawer> : null}

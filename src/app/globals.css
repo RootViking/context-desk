@@ -916,3 +916,45 @@ dl.math dd {
     grid-row: auto;
   }
 }
+
+/* live mode */
+.live-line {
+  margin: 0.15rem 0 0;
+  font-size: 0.74rem;
+  color: var(--color-ink-soft);
+}
+
+.live-dot {
+  color: var(--color-ink-soft);
+}
+
+.live-regular {
+  color: var(--color-signal);
+}
+
+.live-pre,
+.live-after {
+  color: var(--color-amber);
+}
+
+.live-closed,
+.live-paused {
+  color: var(--color-ink-soft);
+}
+
+.entry-banner {
+  background: var(--color-amber);
+  color: var(--color-paper);
+  padding: 0.75rem 0;
+}
+
+.entry-banner .band {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.entry-banner p {
+  margin: 0;
+}
