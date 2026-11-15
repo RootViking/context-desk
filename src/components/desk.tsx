@@ -50,7 +50,13 @@ import { useTicker } from "@/components/use-ticker";
 import { useWorkspace } from "@/components/use-workspace";
 import { useXStatus } from "@/components/use-x";
 import { WatchlistBar } from "@/components/watchlist-bar";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { candlesToBarObservations, type Timeframe } from "@/domain/bars";
+import { ChainPanel } from "@/components/chain-panel";
+import { DirectionPanel } from "@/components/direction-panel";
+import { PriceChart } from "@/components/price-chart";
+import { fetchBars, useBars } from "@/components/use-bars";
+import { useChain } from "@/components/use-chain";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -61,6 +67,11 @@ export function Desk() {
   const x = useXStatus();
   const { state, ready, now, sessionDate } = workspace;
   const ticker = useTicker(state?.selectedSymbol ?? "TSLA");
+  const bars = useBars(state?.selectedSymbol ?? "TSLA");
+  const [chainOpen, setChainOpen] = useState(false);
+  const chain = useChain(state?.selectedSymbol ?? "TSLA", chainOpen);
+  const [timeframe, setTimeframe] = useState<Timeframe>("15m");
+  const [loadingTape, setLoadingTape] = useState(false);
 
   if (!ready || !state || !now || !sessionDate) {
     return (
@@ -146,6 +157,32 @@ export function Desk() {
     );
   }
 
+  async function loadTapeBars() {
+    const members = [...new Set(["SPY", "QQQ", "NVDA", symbol])];
+    setLoadingTape(true);
+    try {
+      const loads = await Promise.allSettled(members.map((member) => fetchBars(member, "15m")));
+      const now = new Date();
+      const rows = loads.flatMap((load, index) =>
+        load.status === "fulfilled" && load.value.state === "ok"
+          ? candlesToBarObservations(load.value.candles, members[index], {
+              now,
+              retrievedAt: load.value.retrievedAt,
+              sourceLabel: "Yahoo chart (unofficial, delayed)",
+              delayNote: "Delayed aggregator bars. Not a live feed.",
+            })
+          : [],
+      );
+      const errors = loads.flatMap((load, index) =>
+        load.status === "rejected" ? [`${members[index]}: ${load.reason instanceof Error ? load.reason.message : "failed"}`] : load.value.state === "error" ? [`${members[index]}: ${load.value.error}`] : [],
+      );
+      if (rows.length === 0) workspace.setNotice(errors.join(" ") || "No bars came back.");
+      else workspace.apply(importParticipationBars(workspaceState, { bars: rows }), `${rows.length} delayed 15-minute bars loaded for ${members.join(", ")}. Typed bars with the same window were replaced.${errors.length ? ` ${errors.join(" ")}` : ""}`);
+    } finally {
+      setLoadingTape(false);
+    }
+  }
+
   return (
     <>
       <a className="skip" href="#feed">Skip to headlines</a>
@@ -169,6 +206,23 @@ export function Desk() {
         contract={
           <OptionsPanel
             symbol={symbol}
+            chain={
+              <ChainPanel
+                symbol={symbol}
+                chain={chain.result}
+                loading={chain.loading}
+                failed={chain.failed}
+                enabled={chainOpen}
+                onEnable={() => setChainOpen(true)}
+                onRefresh={chain.refresh}
+                onUse={(pick) =>
+                  workspace.apply(
+                    setOptionCapture(state, symbol, sessionDate, { ...capture, ...pick }, new Date().toISOString()),
+                    "Cboe delayed quote copied into the capture. Debit, multiplier, contracts, and stop are still yours. Not an order.",
+                  )
+                }
+              />
+            }
             capture={capture}
             formula={state.spreadFormula}
             onCapture={(next) => workspace.apply(setOptionCapture(state, symbol, sessionDate, next, new Date().toISOString()))}
@@ -247,7 +301,14 @@ export function Desk() {
         <p className="notice" role="status">{workspace.notice ?? ""}</p>
       </div>
       <div className="desk">
+        <section className="panel chart-panel" aria-labelledby="chart-title">
+          <h2 id="chart-title" className="sr-only">Delayed chart</h2>
+          <PriceChart symbol={symbol} candlesByTf={bars.candles} timeframe={timeframe} onTimeframe={setTimeframe} />
+        </section>
+        <DirectionPanel symbol={symbol} candlesByTf={bars.candles} loading={bars.loading} failed={bars.failed} retrievedAt={bars.retrievedAt} onRefresh={bars.refresh} />
         <ParticipationPanel
+          loadingBars={loadingTape}
+          onLoadBars={loadTapeBars}
           symbol={symbol}
           sessionDate={sessionDate}
           book={state.participation}
@@ -408,7 +469,7 @@ function HelpCopy() {
         Arrow keys move the watchlist when you are not typing in a field. Keys 1 through 9 jump the full list in order. The contract calculator stays in Contract and is not required before the headlines or the tape.
       </p>
       <p>
-        Block compares SPY, QQQ, and NVDA with the symbol you selected, on one completed 15-minute window and from the 09:30 open. Same, opposite, and mixed are signs only. That comparison was requested. The Academy notes do not define which names share a block or who leads. Index weights, correlation, breadth, and lead/lag are not calculated. NVDA is a comparison symbol, not a watchlist name. Bars are manual.
+        Block compares SPY, QQQ, and NVDA with the symbol you selected, on one completed 15-minute window and from the 09:30 open. Same, opposite, and mixed are signs only. That comparison was requested. The Academy notes do not define which names share a block or who leads. Index weights, correlation, breadth, and lead/lag are not calculated. NVDA is both a watchlist name and a block member. Bars are typed, imported, or loaded from the delayed bars reader.
       </p>
       <p>Orders stay on the Thinkorswim phone. Nothing here is an entry.</p>
     </>

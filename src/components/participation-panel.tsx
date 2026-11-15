@@ -31,7 +31,11 @@ export function ParticipationPanel({
   onSave,
   onRemove,
   onImport,
+  onLoadBars,
+  loadingBars,
 }: {
+  onLoadBars: () => void;
+  loadingBars: boolean;
   symbol: string;
   sessionDate: string;
   book: ParticipationBook;
@@ -136,6 +140,12 @@ export function ParticipationPanel({
         <p>{ALIGNMENT_DEFINITION}</p>
         <p className="meta">{INTRADAY_FEED.reason}</p>
       </details>
+      <div className="filters">
+        <Button type="button" variant="outline" size="sm" onClick={onLoadBars} disabled={loadingBars}>
+          {loadingBars ? "Loading delayed bars…" : "Load delayed 15m bars · SPY, QQQ, NVDA, this symbol"}
+        </Button>
+        <span className="meta">Fills RVOL baselines and the block for the last 30 sessions. Delayed, unofficial, replaces typed bars in the same window.</span>
+      </div>
       <details>
         <summary>Enter or import a bar · {slot.length} stored</summary>
         <BarForm symbol={symbol} sessionDate={sessionDate} windowStart={window.start} windowEnd={window.end} onSave={onSave} />

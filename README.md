@@ -1,8 +1,28 @@
 # Context desk
 
-Personal trading context desk. One screen for complementary trade context: a per-symbol checklist, sourced headlines, fundamentals you type in, an exact-option capture, and the public Federal Reserve calendar.
+Personal options terminal built around the Option Millionaire method: Bollinger Bands first, moving averages second. One screen for a delayed context chart, a direction read, the tape, sourced headlines, the six-row pre-trade checklist, the Cboe delayed option chain, and the public Federal Reserve calendar.
 
-It is not a broker, not a chart, and not a quote service. TC2000 stays the source for 15-minute, hour, and day Bollinger Bands, moving averages, and candles. Orders stay on the Thinkorswim phone. Nothing in this desk submits an order or marks a TC2000 condition for you.
+It is not a broker and not a live quote service. TC2000 stays the chart of record for 15-minute, hour, and day Bollinger Bands, moving averages, trendlines, and candles; the chart here is delayed context drawn from the same kind of bars. Orders stay on the Thinkorswim phone. Nothing in this desk submits an order or marks a checklist row for you.
+
+## 2.0 — what is new
+
+- **Delayed chart.** Candles with Bollinger 20,2 and the 20/40/100/200 simple averages on 15-minute, hour, and day, drawn with [lightweight-charts](https://github.com/tradingview/lightweight-charts) (Apache-2.0). Times are Eastern. No drawing tools; trendlines stay a TC2000 look.
+- **Direction read.** Each timeframe is scored with the notes' weights (Bollinger 50, moving averages 25, candle 15, stochastic 5, volume 5) into a lean from −100 to +100, then combined Day 45 · Hour 35 · 15-minute 20. Confidence is low unless all three agree. The panel shows %B, bandwidth percentile (squeeze / normal / expanding / high), the MA stack, and the latest candle per frame.
+- **Your entry check.** The provisional rule on file, a 15-minute close outside the bands as they widen plus an agreeing candle, with hour and day not against it and price not extended past the band. Met and missing conditions are listed; nothing is rounded up.
+- **Strategy candidates.** The twelve Option Millionaire setups matched on what bars can show. Trendlines and the Worden trigger are listed as "verify in TC2000", never assumed.
+- **Base rates.** On the symbol's own loaded 15-minute bars: after a widening band exit, how often price continued over the next four bars, with sample counts. History, not a forecast.
+- **Tape from bars.** One button loads 30 sessions of delayed 15-minute bars for SPY, QQQ, NVDA, and the selected symbol, so relative volume baselines and the block fill themselves. Typed bars still work and are replaced only in the same window.
+- **Cboe delayed chain.** In Contract: the Academy expiration pick (nearest, or next after 10:30 ET), near-the-money calls and puts with bid/ask, spread percent marked wide at 10%, delta, IV, and open interest. Clicking a quote copies root, right, strike, expiry, bid, ask, source, and delay into the capture. Debit, multiplier, contracts, and stop stay yours.
+- **NVDA** is now a watchlist chip as well as a block member.
+
+Data sources added in 2.0 and their labels:
+
+| Source | Mode | Label in the UI |
+| --- | --- | --- |
+| Yahoo Finance chart endpoint (`query1.finance.yahoo.com/v8/finance/chart`) | Public read, unofficial | "Delayed context, not TC2000". Not a live feed, not a quote. Same guards as the RSS reader: allowlisted host, no redirects, 8 s timeout, 4 MB cap, 60 s cache. Intraday rows outside 09:30–16:00 ET are dropped. |
+| Cboe delayed quotes (`cdn-api.cboe.com/api/global/delayed_quotes/options`) | Public read, labeled 15-minute delayed by Cboe | "Not live. Not a quote for an order." Loaded on request because a chain is 1.5–13 MB. SPX, SPXW, and SPXO roots stay separate. Cboe's terms for automated reads were not reviewed. |
+
+The direction read, entry check, strategy candidates, and base rates are estimates from delayed bars. They are not signals and do not change any review mark or observation.
 
 This is a local unpublished draft. It does not claim market readiness or profitability.
 
@@ -103,8 +123,8 @@ Workspace JSON is version `1`. Unreadable JSON or another version is left untouc
 | Demo fixtures | Demo, off by default | Invented examples. Not market data. |
 | TC2000 | Manual, outside this app | Not embedded, scraped, or replaced. |
 | Thinkorswim / Schwab | Not connected | No order API. Phone execution only. |
-| Intraday 15-minute bars | Manual | No documented keyless consolidated bar feed. Nasdaq bars need a bearer token. Relative volume, SPY/QQQ setup alignment, and the SPY/QQQ/NVDA block use bars you type or import. A typed bar is not a live quote. Time and sales, bid/ask side, and book depth are unavailable. An up bar is not a buy. |
-| Block comparison | Manual | SPY, QQQ, NVDA, plus the selected symbol when it is not already one of those three. Completed 15-minute percent and session-open percent. Same, opposite, mixed, unchanged, or incomplete. Not a leader and not Academy confirmation. |
+| Intraday 15-minute bars | Typed, imported, or loaded (delayed) | The Load button reads the unofficial Yahoo chart endpoint for 30 sessions of 15-minute bars and converts them to tape rows. Delayed and unofficial, not a live quote. Time and sales, bid/ask side, and book depth are unavailable. An up bar is not a buy. |
+| Block comparison | Typed or loaded | SPY, QQQ, NVDA, plus the selected symbol when it is not already one of those three. Completed 15-minute percent and session-open percent. Same, opposite, mixed, unchanged, or incomplete. Not a leader and not Academy confirmation. |
 | SpaceX / SPCX | Listed stock, public reads where the other adapters already apply | SEC submissions CIK 0001181412 returned ticker SPCX on Nasdaq on 2026-11-09. Form 10-Q filed 2026-10-22 (`0001628280-26-066880`) registers Class A common stock, symbol SPCX, on Nasdaq and Nasdaq Texas. Yahoo symbol RSS answered for SPCX as an aggregator. Nasdaq Trader News DTN2026-8 says this listing was set for June 12, 2026 and that SPCX previously named a different security. Not TSLA. No synthetic price, option, or RVOL. |
 
 Launchers that this environment actually received HTTP 200 for: Federal Reserve calendar, monetary-policy feed, and feed directory; Finviz AAPL (redirected to `/stock`); Yahoo AAPL and `^GSPC`; CNBC AAPL and `.SPX`; OptionSlam AAPL. MarketWatch, Bloomberg, and WSJ refused the automated request (401 or 403). Those links are still offered and marked unverified. Other symbols use the same path pattern and were not each checked.
@@ -136,4 +156,4 @@ Unit tests cover Eastern dates across the March 2026 spring-forward and November
 
 ## Not in this desk
 
-No order ticket, no account login, no key collection, no chart, no technical scanner, no automatic green check, no made-up quote, target, fee, or market condition, and no claim that one unchecked item forbids a trade.
+No order ticket, no account login, no key collection, no live quote, no automatic green check, no made-up quote, target, fee, or market condition, and no claim that one unchecked item forbids a trade. The chart and the direction read are delayed context and estimates, never signals.

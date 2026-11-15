@@ -51,6 +51,7 @@ export const SEC_LOOKUP: Record<string, { cik: string; match: "ticker" | "name" 
   AAPL: { cik: "0000320193", match: "ticker" },
   TSLA: { cik: "0001318605", match: "ticker" },
   META: { cik: "0001326801", match: "ticker" },
+  NVDA: { cik: "0001045810", match: "ticker" },
   SPY: { cik: "0000884394", match: "ticker" },
   DIA: { cik: "0001041130", match: "ticker" },
   QQQ: { cik: "0001067839", match: "name" },
@@ -60,6 +61,7 @@ export const SEC_LOOKUP: Record<string, { cik: string; match: "ticker" | "name" 
 const ALIASES: Record<string, readonly string[]> = {
   TSLA: ["TSLA", "Tesla"],
   META: ["META", "Meta Platforms", "Facebook"],
+  NVDA: ["NVDA", "Nvidia", "NVIDIA"],
   AAPL: ["AAPL", "Apple"],
   SPY: ["SPY", "SPDR S&P 500"],
   QQQ: ["QQQ", "Invesco QQQ"],

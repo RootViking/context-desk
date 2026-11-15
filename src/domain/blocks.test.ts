@@ -37,7 +37,7 @@ describe("block comparison", () => {
     expect(blockMembers("TSLA")).toEqual(["SPY", "QQQ", "NVDA", "TSLA"]);
     expect(blockMembers("QQQ")).toEqual(["SPY", "QQQ", "NVDA"]);
     expect(blockMembers("SPCX")).toContain("NVDA");
-    expect(isWatchSymbol("NVDA")).toBe(false);
+    expect(isWatchSymbol("NVDA")).toBe(true);
     expect(isWatchSymbol("HPY")).toBe(false);
     expect(validateBar(draft("NVDA", 100, 102, 98)).ok).toBe(true);
   });

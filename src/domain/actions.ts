@@ -333,7 +333,7 @@ export function setSetupDirection(
 export function saveParticipationBar(state: WorkspaceState, draft: BarDraft): ActionResult {
   const validated = validateBar(draft);
   if (!validated.ok) return fail(state, validated.error);
-  const bars = upsertBar(state.participation.bars, validated.bar).slice(-500);
+  const bars = upsertBar(state.participation.bars, validated.bar).slice(-6000);
   return ok({ ...state, participation: { ...state.participation, bars } });
 }
 
@@ -351,7 +351,7 @@ export function importParticipationBars(state: WorkspaceState, raw: unknown): Ac
   }
   let bars = state.participation.bars;
   for (const bar of imported.bars) bars = upsertBar(bars, bar);
-  const next = { ...state, participation: { ...state.participation, bars: bars.slice(-500) } };
+  const next = { ...state, participation: { ...state.participation, bars: bars.slice(-6000) } };
   if (imported.errors.length) return fail(next, imported.errors.join(" "));
   return ok(next);
 }
