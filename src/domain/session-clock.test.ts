@@ -13,7 +13,7 @@ describe("market phase", () => {
   });
 
   it("polls fastest during the regular session", () => {
-    expect(refreshIntervalMs("regular")).toBe(60_000);
+    expect(refreshIntervalMs("regular")).toBe(30_000);
     expect(refreshIntervalMs("closed")).toBeGreaterThan(refreshIntervalMs("after"));
   });
 });

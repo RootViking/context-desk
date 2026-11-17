@@ -5,6 +5,7 @@ import {
   addEarnings,
   attachCaptureEvidence,
   attachFilingEvidence,
+  attachWireEvidence,
   attachHeadlineEvidence,
   attachMeetingEvidence,
   attachNewsEvidence,
@@ -36,7 +37,7 @@ import type { FedPressItem, FomcMeeting } from "@/domain/fed-parse";
 import { ADVISORY_LIMITS, BOLLINGER_ADAPTATION, TC2000_BOUNDARY } from "@/domain/limits";
 import type { NewsDraft } from "@/domain/news";
 import { checklistFor, fundamentalsFor, optionFor } from "@/domain/state";
-import { describeSession, formatInstantEt, isSessionDate } from "@/domain/time";
+import { describeSession, easternLocalToIso, formatInstantEt, isSessionDate } from "@/domain/time";
 import { instrumentFor } from "@/domain/watchlist";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { ChecklistRail } from "@/components/checklist-rail";
@@ -50,7 +51,7 @@ import { useTicker } from "@/components/use-ticker";
 import { useWorkspace } from "@/components/use-workspace";
 import { useXStatus } from "@/components/use-x";
 import { WatchlistBar } from "@/components/watchlist-bar";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { readDirection } from "@/domain/direction";
 import { LIVE_NOTE } from "@/domain/session-clock";
 import { useAlertSound } from "@/components/use-alert-sound";
@@ -64,6 +65,19 @@ import { useChain } from "@/components/use-chain";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { diffReads, narrate, type AnalysisEvent } from "@/domain/analysis";
+import { contractCandidate } from "@/domain/candidate";
+import { PULSE_SYMBOLS, pulseRow } from "@/domain/pulse";
+import { applyQuoteToCandles, PROVIDER_LABEL, stampAge, type QuoteProvider } from "@/domain/quote";
+import { classifyFreshness } from "@/domain/freshness";
+import { eventRisk } from "@/domain/wire";
+import { AnalysisLog } from "@/components/analysis-log";
+import { CandidatePanel, useAccountSize } from "@/components/candidate-panel";
+import { PulseStrip } from "@/components/pulse-strip";
+import { usePulse } from "@/components/use-pulse";
+import { useQuote } from "@/components/use-quote";
+import { useWire } from "@/components/use-wire";
+import { WirePanel } from "@/components/wire-panel";
 
 export function Desk() {
   const workspace = useWorkspace();
@@ -87,7 +101,35 @@ export function Desk() {
   }, liveSymbol);
   const sound = useAlertSound();
   const [alert, setAlert] = useState<{ symbol: string; trigger: "call" | "put"; at: string } | null>(null);
-  const entryTrigger = readDirection(bars.candles).entry.trigger;
+  const quote = useQuote(liveSymbol, live.on);
+  const pulse = usePulse(live.on);
+  const wire = useWire();
+  const wireTick = useRef(0);
+  useEffect(() => {
+    if (!live.lastTickAt) return;
+    wireTick.current += 1;
+    if (wireTick.current % 4 === 0) wire.refresh();
+  }, [live.lastTickAt, wire]);
+  const liveCandles = useMemo(
+    () => ({
+      "15m": applyQuoteToCandles(bars.candles["15m"], quote.quote, 900),
+      "1h": applyQuoteToCandles(bars.candles["1h"], quote.quote, 3600),
+      "1d": applyQuoteToCandles(bars.candles["1d"], quote.quote, 86_400),
+    }),
+    [bars.candles, quote.quote],
+  );
+  const read = useMemo(() => readDirection(liveCandles), [liveCandles]);
+  const entryTrigger = read.entry.trigger;
+  const [events, setEvents] = useState<AnalysisEvent[]>([]);
+  const prevRead = useRef<{ symbol: string; read: typeof read | null }>({ symbol: liveSymbol, read: null });
+  useEffect(() => {
+    if (read.reads["15m"].bars === 0) return;
+    const prev = prevRead.current.symbol === liveSymbol ? prevRead.current.read : null;
+    const fresh = diffReads(prev, read, liveSymbol, new Date().toISOString());
+    if (fresh.length) setEvents((current) => [...fresh.reverse(), ...current].slice(0, 200));
+    prevRead.current = { symbol: liveSymbol, read };
+  }, [read, liveSymbol]);
+  const [accountSize, setAccountSize, accountRaw] = useAccountSize();
   const lastTrigger = useRef<{ symbol: string; trigger: "call" | "put" | null }>({ symbol: liveSymbol, trigger: null });
   useEffect(() => {
     const prev = lastTrigger.current;
@@ -119,6 +161,28 @@ export function Desk() {
   const earnings = state.earnings.filter((event) => event.symbol === symbol);
   const symbolEvent = nextSymbolEvent(state.earnings, symbol, sessionDate);
   const fomc = nextFomcDate(fed.result?.calendar.data ?? [], sessionDate, fed.failed ?? fed.result?.calendar.error ?? (fed.result ? null : "Not retrieved yet."));
+  const phase = live.phase;
+  const quoteAge = stampAge(quote.quote?.time ?? null, now, phase);
+  const quoteLine = quote.quote ? `${quote.quote.price.toFixed(2)} · ${PROVIDER_LABEL[quote.quote.provider]} · ${quoteAge.label}` : quote.failed ? `quote Unknown · ${quote.failed}` : "quote loading";
+  const barsAge = stampAge(bars.loads["15m"]?.meta?.regularMarketTime ?? null, now, phase);
+  const chainAge = chain.result?.state === "ok" ? stampAge(chain.result.timestamp ? easternTextToIso(chain.result.timestamp) : null, now, phase) : null;
+  const quotesBySymbol = new Map((pulse?.loads ?? []).filter((l) => l.state === "ok").map((l) => [l.symbol, l.state === "ok" ? l.quote : null]));
+  const pulseRows = PULSE_SYMBOLS.map((member) => pulseRow(member, member === symbol && quote.quote ? quote.quote : (quotesBySymbol.get(member) ?? null), member === symbol ? liveCandles["15m"] : null));
+  const pulseProviders = Object.fromEntries(PULSE_SYMBOLS.map((member) => [member, (member === symbol ? quote.quote : quotesBySymbol.get(member))?.provider])) as Record<string, QuoteProvider | undefined>;
+  const wireItems = wire.result?.items ?? [];
+  const risk = eventRisk({
+    sessionDate,
+    fomcDate: fomc.state === "dated" ? fomc.meeting.startDate : null,
+    fomcKnown: fomc.state === "dated",
+    earningsDate: symbolEvent.state === "recorded" ? symbolEvent.date : null,
+    namedFreshCount: wireItems.filter((item) => item.symbols.includes(symbol) && classifyFreshness(item.publishedAt, null, now).freshness === "fresh").length,
+    macroFreshCount: wireItems.filter((item) => item.macroCue !== null && classifyFreshness(item.publishedAt, null, now).freshness === "fresh").length,
+  });
+  const candidate = contractCandidate({
+    read,
+    chain: chain.result?.state === "ok" ? { underlying: chain.result.underlying, contracts: chain.result.contracts, retrievedAt: chain.result.retrievedAt } : null,
+    accountSize,
+  });
 
   function applyReview(itemId: ChecklistItemId, review: ReviewMark) {
     workspace.apply(setReview(workspaceState, { symbol, sessionDate: sessionDate!, itemId, review, at: new Date().toISOString() }), "Review saved. Observation was not changed.");
@@ -235,6 +299,7 @@ export function Desk() {
         help={<HelpCopy />}
         live={live}
         liveRetrievedAt={bars.retrievedAt}
+        quoteLine={`${symbol} ${quoteLine}`}
         onLiveToggle={() => setLiveOn(!live.on)}
         onRefreshNow={refreshNow}
         soundOn={sound.enabled}
@@ -344,14 +409,33 @@ export function Desk() {
             </details>
           ) : null}
         </div>
+        <PulseStrip rows={pulseRows} providers={pulseProviders} selected={symbol} now={now} phase={phase} onSelect={(next) => workspace.apply(selectSymbol(state, next))} />
         <p className="notice" role="status">{workspace.notice ?? ""}</p>
       </div>
       <div className="desk">
         <section className="panel chart-panel" aria-labelledby="chart-title">
           <h2 id="chart-title" className="sr-only">Delayed chart</h2>
-          <PriceChart symbol={symbol} candlesByTf={bars.candles} timeframe={timeframe} onTimeframe={setTimeframe} />
+          <PriceChart symbol={symbol} candlesByTf={liveCandles} timeframe={timeframe} onTimeframe={setTimeframe} stampLine={`Bars: Yahoo chart, ${barsAge.label}. Last bar carries the quote.`} />
         </section>
-        <DirectionPanel symbol={symbol} candlesByTf={bars.candles} loading={bars.loading} failed={bars.failed} retrievedAt={bars.retrievedAt} onRefresh={bars.refresh} />
+        <DirectionPanel symbol={symbol} candlesByTf={liveCandles} loading={bars.loading} failed={bars.failed} retrievedAt={bars.retrievedAt} onRefresh={bars.refresh} />
+        <CandidatePanel
+          symbol={symbol}
+          candidate={candidate}
+          chainLoaded={chainOpen && chain.result?.state === "ok"}
+          chainLoading={chain.loading}
+          chainAge={chainAge}
+          quoteLine={quoteLine}
+          accountRaw={accountRaw}
+          onAccount={setAccountSize}
+          onLoadChain={() => setChainOpen(true)}
+          onUse={(pick) =>
+            workspace.apply(
+              setOptionCapture(state, symbol, sessionDate, { ...capture, ...pick, sourceTimestampLocal: chain.result?.timestamp ? chain.result.timestamp.replace(" ", "T").slice(0, 16) : capture.sourceTimestampLocal }, new Date().toISOString()),
+              "Candidate quote copied into the capture. Debit, multiplier, contracts, and stop are still yours. Not an order.",
+            )
+          }
+        />
+        <AnalysisLog symbol={symbol} lines={narrate(read)} events={events.filter((event) => event.symbol === symbol)} stampLine={quoteLine} onClear={() => setEvents([])} />
         <ParticipationPanel
           loadingBars={loadingTape}
           onLoadBars={loadTapeBars}
@@ -373,6 +457,23 @@ export function Desk() {
           setupError={workspace.notice && /not guessed|leave the field blank/.test(workspace.notice) ? workspace.notice : null}
         />
         <ContextFeed
+          wire={
+            <WirePanel
+              symbol={symbol}
+              wire={wire.result}
+              failed={wire.failed}
+              loading={wire.loading}
+              now={now}
+              risk={risk}
+              onRefresh={wire.refresh}
+              onAttach={(item) =>
+                workspace.apply(
+                  attachWireEvidence(state, { symbol, sessionDate, item, evidenceId: crypto.randomUUID(), at: new Date().toISOString(), retrievedAt: wire.result?.retrievedAt ?? new Date().toISOString() }),
+                  "Wire title attached. Review and observation were not changed. This is not a permission to trade.",
+                )
+              }
+            />
+          }
           symbol={symbol}
           items={library}
           demo={state.demo}
@@ -426,6 +527,13 @@ export function Desk() {
   );
 }
 
+/** Cboe stamps are Eastern wall clock text like "2026-11-16 15:59:58". */
+function easternTextToIso(text: string): string | null {
+  const local = text.trim().replace(" ", "T").slice(0, 16);
+  const result = easternLocalToIso(local);
+  return result.ok ? result.iso : null;
+}
+
 function Mast({
   sessionDate,
   nowLabel,
@@ -436,6 +544,7 @@ function Mast({
   contract,
   live,
   liveRetrievedAt,
+  quoteLine,
   onLiveToggle,
   onRefreshNow,
   soundOn,
@@ -450,6 +559,7 @@ function Mast({
   contract?: ReactNode;
   live?: LiveState;
   liveRetrievedAt?: string | null;
+  quoteLine?: string;
   onLiveToggle?: () => void;
   onRefreshNow?: () => void;
   soundOn?: boolean;
@@ -468,7 +578,11 @@ function Mast({
                 <span className={live.on ? `live-dot live-${live.phase}` : "live-dot live-paused"} aria-hidden="true">●</span>{" "}
                 {live.on ? `Live · ${live.phase} · every ${Math.round(live.intervalMs / 1000)}s · next in ${live.nextInSeconds}s` : "Paused"}
                 {liveRetrievedAt ? ` · bars read ${formatInstantEt(liveRetrievedAt)}` : ""}
-                {" · delayed source"}
+              </p>
+            ) : null}
+            {quoteLine ? (
+              <p className="live-line mono quote-line">
+                {quoteLine}
               </p>
             ) : null}
           </div>

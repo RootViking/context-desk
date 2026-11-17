@@ -6,6 +6,7 @@ import { continuationOdds } from "@/domain/odds";
 import { matchStrategies } from "@/domain/strategies";
 import { formatInstantEt } from "@/domain/time";
 import { Button } from "@/components/ui/button";
+import { ComponentBars, LeanGauge } from "@/components/gauge";
 
 /**
  * Direction read: where the delayed bars lean, weighted the way the notes weight indicators,
@@ -40,11 +41,15 @@ export function DirectionPanel({
         <h2 id="direction-title">Direction</h2>
         <p className={`rvol-figure ${tone}`}>{loading ? "…" : read.bias === "neutral" ? "Flat" : read.bias === "bullish" ? "Up" : "Down"}</p>
         <p className="meta">
-          score {read.combinedScore} · confidence {read.confidence} · {retrievedAt ? `read ${formatInstantEt(retrievedAt)}` : "not loaded"}
+          score {read.combinedScore} · confidence {read.confidence} · {retrievedAt ? `bars read ${formatInstantEt(retrievedAt)}` : "not loaded"} · bars are 15-minute component scores
         </p>
       </div>
       {failed ? <p className="errors">{failed}</p> : null}
-      <p className="result-line">{loading ? "Loading delayed bars…" : read.headline}</p>
+      <div className="read-visual">
+        <LeanGauge score={read.combinedScore} bias={read.bias} confidence={read.confidence} />
+        <ComponentBars components={m15.components.length ? m15.components : []} />
+      </div>
+      <p className="result-line">{loading && !read.reads["15m"].bars ? "Loading bars…" : read.headline}</p>
 
       <div className={`entry ${read.entry.trigger ? "entry-on" : ""}`}>
         <p className="meta">

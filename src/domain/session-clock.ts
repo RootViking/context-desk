@@ -18,10 +18,10 @@ export function marketPhase(now: Date): MarketPhase {
 
 /** Live-mode refresh cadence per phase, in milliseconds. Off-hours still polls slowly so a restart picks up revisions. */
 export function refreshIntervalMs(phase: MarketPhase): number {
-  if (phase === "regular") return 60_000;
+  if (phase === "regular") return 30_000;
   if (phase === "pre" || phase === "after") return 180_000;
   return 600_000;
 }
 
 export const LIVE_NOTE =
-  "Live mode re-reads the delayed bars every minute during the regular session, every 3 minutes pre- and post-market, and every 10 minutes when closed. The source is still delayed. A refresh is not a live quote.";
+  "Live mode re-reads the bars every 30 seconds during the regular session, the quote every 10 seconds, every 3 minutes pre- and post-market, and every 10 minutes when closed. Each feed shows the age of its own stamp. A refresh is not a quote for an order.";

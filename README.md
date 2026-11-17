@@ -4,6 +4,20 @@ Personal options terminal built around the Option Millionaire method: Bollinger 
 
 It is not a broker and not a live quote service. TC2000 stays the chart of record for 15-minute, hour, and day Bollinger Bands, moving averages, trendlines, and candles; the chart here is delayed context drawn from the same kind of bars. Orders stay on the Thinkorswim phone. Nothing in this desk submits an order or marks a checklist row for you.
 
+## 2.1 — live calls
+
+Everything on the desk now refreshes on its own and shows the measured age of its source's own stamp, never a blanket label.
+
+- **Quote tick.** The selected symbol's last price is polled every 10 s in the regular session (30 s pre/post, off when closed). With `ALPACA_KEY_ID` and `ALPACA_SECRET_KEY` in `.env.local` (free Basic plan), the price comes from Alpaca's licensed real-time IEX feed. Without keys it comes from the unofficial Yahoo chart stamp, which measured seconds old in the session. The provider and the stamp age sit in the mast, and the last candle on the chart carries the quote between bar refreshes. SPX always uses Yahoo.
+- **Pulse strip.** SPY, QQQ, TSLA, SPCX, NVDA, META in one row: price, change since the open, today's minute line, the 15-minute lean for the selected name, and each cell's stamp age (fresh under 30 s, lagging under 5 min, stale beyond). Click a cell to select it.
+- **Bars** refresh every 30 s in the session. **Wire** headlines refresh every fourth tick. The chain refreshes every third tick once loaded.
+- **Candidate.** CALL or PUT with a strike: the side from your 15-minute entry when it is present, else from the combined lean at medium or high confidence; the Academy expiration; the at-the-money strike on the Cboe chain with bid/ask, spread (wide at 10%), premium per contract, the +10% contract target, and how many contracts 10% of the account buys. Account size is kept in this browser only. Interpretation, not a signal, not an order. Strike selection is a desk default, not an Academy rule.
+- **Live analysis.** A narrative line per timeframe, rebuilt every refresh, plus a log of what changed between reads: lean, band exits, volatility state, MA stack, stochastic crosses, 2× volume, entry conditions appearing or dropping.
+- **Wire.** CNBC (top news, finance), MarketWatch top stories, Nasdaq markets, Federal Reserve press, and SEC press releases, titles and links only, filtered to "names this symbol", "names a watchlist symbol", "macro", or all. Each title gets a keyword tone dot (labeled as a keyword read) and watchlist tags. A "Noticia mata estrategia" box puts FOMC day, earnings within a day, and fresh naming headlines ahead of the chart.
+- **Chart.** Volume pane with 2× bars highlighted, a 12/3 stochastic pane, and arrows on every close outside the bands, colored when the bands widen. A lean gauge and per-component bars sit in Direction.
+
+What is still not live, by licence: the Cboe chain is 15-minute delayed by Cboe, and its stamp age is shown. Real-time options quotes need a licensed feed (Schwab Trader API with your Thinkorswim account, or Tradier with a brokerage account). The provider slot in `src/server/quote-client.ts` is where that lands. See [docs/ROADMAP-2.0.md](docs/ROADMAP-2.0.md).
+
 ## 2.0 — what is new
 
 - **Delayed chart.** Candles with Bollinger 20,2 and the 20/40/100/200 simple averages on 15-minute, hour, and day, drawn with [lightweight-charts](https://github.com/tradingview/lightweight-charts) (Apache-2.0). Times are Eastern. No drawing tools; trendlines stay a TC2000 look.
@@ -42,7 +56,7 @@ npm run lint
 npm run build
 ```
 
-Data is stored in this browser under `context-desk.workspace.v1`. No account, no API key, and no environment variable is required. The Federal Reserve reader, the Yahoo Finance symbol RSS reader, and the SEC submissions reader run server-side when you open the desk.
+Data is stored in this browser under `context-desk.workspace.v1`. No account or API key is required; copy `.env.example` to `.env.local` and add Alpaca keys for the licensed real-time stock quote. The Federal Reserve reader, the Yahoo Finance symbol RSS reader, and the SEC submissions reader run server-side when you open the desk.
 
 This dev server’s loopback address is reachable on the machine that runs it. It is not a hosted preview. Opening it here does not publish the draft.
 

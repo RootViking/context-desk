@@ -14,6 +14,7 @@ import {
 import { describeMeeting, type FedPressItem, type FomcMeeting } from "@/domain/fed-parse";
 import type { SecFiling } from "@/domain/sec-parse";
 import type { AggregatorHeadline, TickerSec } from "@/domain/ticker-feed";
+import type { WireItem } from "@/domain/wire";
 import {
   isEarningsTiming,
   type EarningsEvent,
@@ -234,6 +235,30 @@ export function attachHeadlineEvidence(
     recordedAt: input.at,
     sourceUrl: input.item.url,
     sourceLabel: "Yahoo Finance symbol RSS (aggregator)",
+    publishedAt: input.item.publishedAt,
+    eventAt: null,
+    eventDate: null,
+    retrievedAt: input.retrievedAt,
+    scope: "symbol",
+  };
+  return addChecklistEvidence(state, { symbol: input.symbol, sessionDate: input.sessionDate, evidence });
+}
+
+export function attachWireEvidence(
+  state: WorkspaceState,
+  input: { symbol: string; sessionDate: string; item: WireItem; evidenceId: string; at: string; retrievedAt: string },
+): ActionResult {
+  if (!input.item.symbols.includes(input.symbol)) {
+    return fail(state, "A title that does not name the symbol is not attached as symbol evidence.");
+  }
+  const evidence: Evidence = {
+    id: input.evidenceId,
+    itemId: "fed_earnings",
+    kind: "sourced_fact",
+    text: `${input.item.title}. ${input.item.publisher} public RSS title. Link host ${input.item.linkHost}. Title only; the body was not retrieved. Keyword tone was not copied.`,
+    recordedAt: input.at,
+    sourceUrl: input.item.url,
+    sourceLabel: `${input.item.publisher} RSS (title only)`,
     publishedAt: input.item.publishedAt,
     eventAt: null,
     eventDate: null,

@@ -3,7 +3,7 @@ import { publicGet } from "@/server/public-get";
 
 const MAX_BYTES = 4_000_000;
 const USER_AGENT = "Mozilla/5.0 (compatible; ContextDesk/0.2; personal read-only workstation)";
-const SUCCESS_TTL_MS = 60_000;
+const SUCCESS_TTL_MS = 20_000;
 const ERROR_TTL_MS = 20_000;
 
 const cache = new Map<string, { at: number; ttl: number; value: BarsLoad }>();
