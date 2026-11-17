@@ -21,7 +21,7 @@ export function tapeRows(symbol: string): TapeRow[] {
       kind: "bar_volume",
       label: "Bar volume",
       availability: index ? "not_applicable" : "manual",
-      status: index ? "N/A" : "Manual",
+      status: index ? "N/A" : "Typed or loaded",
     },
     {
       kind: "time_and_sales",

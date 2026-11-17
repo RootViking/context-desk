@@ -7,10 +7,10 @@ export const REGULAR_OPEN_MINUTES = 9 * 60 + 30;
 export const REGULAR_CLOSE_MINUTES = 16 * 60;
 
 export const INTRADAY_FEED = {
-  mode: "disconnected" as const,
-  entry: "manual" as const,
+  mode: "delayed" as const,
+  entry: "manual_or_loaded" as const,
   reason:
-    "No documented keyless 15-minute bar feed is connected. Nasdaq bars require a bearer token. SEC submissions are filings, not trades. Undocumented chart endpoints are not called. Bars below are only what you type or import.",
+    "Bars come from what you type or import, or from the delayed Yahoo chart reader when you press Load. That reader is unofficial and delayed; it is not a live feed and not a quote. A loaded bar replaces a typed bar in the same window.",
 };
 
 export const RVOL_FORMULA =

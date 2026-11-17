@@ -10,6 +10,8 @@ export async function publicGet(
     accept: string;
     userAgent: string;
     label: string;
+    /** Extra request headers, such as a provider key read server-side. */
+    headers?: Record<string, string>;
   },
 ): Promise<PublicGetResult> {
   let parsed: URL;
@@ -27,7 +29,7 @@ export async function publicGet(
     const response = await fetchImpl(url, {
       redirect: "manual",
       signal: controller.signal,
-      headers: { accept: options.accept, "user-agent": options.userAgent },
+      headers: { accept: options.accept, "user-agent": options.userAgent, ...(options.headers ?? {}) },
     });
     if (response.status >= 300 && response.status < 400) {
       return { ok: false, error: `${options.label} responded with a redirect (${response.status}), which this reader refuses.` };

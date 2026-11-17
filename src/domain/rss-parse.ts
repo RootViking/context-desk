@@ -7,6 +7,30 @@ export type RssParse = {
   notices: string[];
 };
 
+export type RssRaw = { title: string; url: string; publishedAt: string | null; linkHost: string };
+
+/** Generic RSS 2.0 items: title, link, pubDate. Descriptions and bodies are not kept. */
+export function parseRssItems(xml: string, limit = 40): RssRaw[] {
+  if (!/<rss[\s>]/i.test(xml) && !/<item[\s>]/i.test(xml)) return [];
+  const seen = new Set<string>();
+  const out: RssRaw[] = [];
+  for (const block of xml.split(/<item\b/i).slice(1)) {
+    const title = cleanText(decodeXml(inner(block, "title") ?? ""), 400).trim();
+    const link = normalizeUrl(decodeXml(inner(block, "link") ?? "").trim());
+    if (!title || !link || seen.has(link)) continue;
+    seen.add(link);
+    let linkHost = "unknown host";
+    try {
+      linkHost = new URL(link).hostname;
+    } catch {
+      linkHost = "unknown host";
+    }
+    out.push({ title, url: link, publishedAt: isoOrNull(inner(block, "pubDate")), linkHost });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 export function parseYahooHeadlines(xml: string, symbol: string): RssParse {
   const notices = [
     "Yahoo Finance is an aggregator. A headline on the symbol feed is not publisher coverage and is not a quote from this desk.",

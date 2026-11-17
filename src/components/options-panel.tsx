@@ -6,6 +6,7 @@ import { formatInstantEt } from "@/domain/time";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/field";
+import type { ReactNode } from "react";
 
 export function OptionsPanel({
   symbol,
@@ -14,8 +15,10 @@ export function OptionsPanel({
   onCapture,
   onFormula,
   onAttach,
+  chain,
 }: {
   symbol: string;
+  chain?: ReactNode;
   capture: OptionCapture;
   formula: SpreadFormula;
   onCapture: (capture: OptionCapture) => void;
@@ -30,6 +33,12 @@ export function OptionsPanel({
   return (
     <section className="panel" id="contract" aria-labelledby="contract-title">
       <h2 id="contract-title">Exact contract</h2>
+      {chain ? (
+        <details className="chain-drawer" open>
+          <summary>Cboe delayed chain · pick a quote, then the capture below is yours</summary>
+          {chain}
+        </details>
+      ) : null}
       <p className="result-line">
         Spread {math.spreadDollars === null ? <span className="unknown-word">Unknown</span> : `${formatPrice(math.spreadDollars)}`}
         {" · "}Exposure {math.fullPremiumExposure === null ? <span className="unknown-word">Unknown</span> : formatDollars(math.fullPremiumExposure)}

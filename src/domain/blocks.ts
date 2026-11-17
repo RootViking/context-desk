@@ -2,7 +2,7 @@ import type { BarObservation, ClockWindow } from "@/domain/participation";
 import { asOfFitsWindow, priceChange } from "@/domain/participation";
 import { isWeekendDate } from "@/domain/time";
 
-/** Requested comparison set. NVDA is not a trading-watchlist symbol. */
+/** Requested comparison set. NVDA is also a watchlist symbol since 2.0. */
 export const BLOCK_CORE = ["SPY", "QQQ", "NVDA"] as const;
 
 export const BLOCK_SCOPE =

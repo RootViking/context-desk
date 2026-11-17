@@ -6,7 +6,7 @@ export const ADVISORY_LIMITS = [
 ] as const;
 
 export const TC2000_BOUNDARY =
-  "15-minute, hour, and day bands, moving averages, trendlines, and candles stay in TC2000. This desk does not read that platform, does not draw a replacement chart, and does not mark those items for you.";
+  "TC2000 is the chart of record for 15-minute, hour, and day bands, moving averages, trendlines, and candles. The desk draws a delayed context chart and a direction read from delayed bars, labeled as such. It does not read TC2000 and does not mark those items for you.";
 
 export const BOLLINGER_ADAPTATION =
   "Adaptation on file: a 15-minute price exits the bands as they widen, plus a clear candle. No universal completed-candle rule and no numeric stop are established.";

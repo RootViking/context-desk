@@ -14,6 +14,7 @@ import {
 import { describeMeeting, type FedPressItem, type FomcMeeting } from "@/domain/fed-parse";
 import type { SecFiling } from "@/domain/sec-parse";
 import type { AggregatorHeadline, TickerSec } from "@/domain/ticker-feed";
+import type { WireItem } from "@/domain/wire";
 import {
   isEarningsTiming,
   type EarningsEvent,
@@ -243,6 +244,30 @@ export function attachHeadlineEvidence(
   return addChecklistEvidence(state, { symbol: input.symbol, sessionDate: input.sessionDate, evidence });
 }
 
+export function attachWireEvidence(
+  state: WorkspaceState,
+  input: { symbol: string; sessionDate: string; item: WireItem; evidenceId: string; at: string; retrievedAt: string },
+): ActionResult {
+  if (!input.item.symbols.includes(input.symbol)) {
+    return fail(state, "A title that does not name the symbol is not attached as symbol evidence.");
+  }
+  const evidence: Evidence = {
+    id: input.evidenceId,
+    itemId: "fed_earnings",
+    kind: "sourced_fact",
+    text: `${input.item.title}. ${input.item.publisher} public RSS title. Link host ${input.item.linkHost}. Title only; the body was not retrieved. Keyword tone was not copied.`,
+    recordedAt: input.at,
+    sourceUrl: input.item.url,
+    sourceLabel: `${input.item.publisher} RSS (title only)`,
+    publishedAt: input.item.publishedAt,
+    eventAt: null,
+    eventDate: null,
+    retrievedAt: input.retrievedAt,
+    scope: "symbol",
+  };
+  return addChecklistEvidence(state, { symbol: input.symbol, sessionDate: input.sessionDate, evidence });
+}
+
 export function attachFilingEvidence(
   state: WorkspaceState,
   input: {
@@ -333,7 +358,7 @@ export function setSetupDirection(
 export function saveParticipationBar(state: WorkspaceState, draft: BarDraft): ActionResult {
   const validated = validateBar(draft);
   if (!validated.ok) return fail(state, validated.error);
-  const bars = upsertBar(state.participation.bars, validated.bar).slice(-500);
+  const bars = upsertBar(state.participation.bars, validated.bar).slice(-6000);
   return ok({ ...state, participation: { ...state.participation, bars } });
 }
 
@@ -351,7 +376,7 @@ export function importParticipationBars(state: WorkspaceState, raw: unknown): Ac
   }
   let bars = state.participation.bars;
   for (const bar of imported.bars) bars = upsertBar(bars, bar);
-  const next = { ...state, participation: { ...state.participation, bars: bars.slice(-500) } };
+  const next = { ...state, participation: { ...state.participation, bars: bars.slice(-6000) } };
   if (imported.errors.length) return fail(next, imported.errors.join(" "));
   return ok(next);
 }

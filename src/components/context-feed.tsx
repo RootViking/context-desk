@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { ActionResult } from "@/domain/actions";
 import { partitionDirect } from "@/domain/coverage";
 import { coveragePending, coverageShort, coverageSummary, type AggregatorHeadline, type TickerLoad } from "@/domain/ticker-feed";
@@ -31,7 +31,9 @@ export function ContextFeed({
   onAttachPress,
   onAttachHeadline,
   onAttachFiling,
+  wire,
 }: {
+  wire?: ReactNode;
   symbol: string;
   items: NewsItem[];
   demo: boolean;
@@ -68,6 +70,7 @@ export function ContextFeed({
   return (
     <section className="panel wire" id="feed" aria-labelledby="feed-title">
       <h2 id="feed-title">{symbol}</h2>
+      {wire}
       <p className="meta">
         {ticker ? coverageShort(ticker) : coveragePending(tickerFailed ?? (tickerLoading ? `reading public feeds for ${symbol}.` : "Unknown."))}
       </p>

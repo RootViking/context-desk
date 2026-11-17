@@ -5,6 +5,7 @@ import {
   addEarnings,
   attachCaptureEvidence,
   attachFilingEvidence,
+  attachWireEvidence,
   attachHeadlineEvidence,
   attachMeetingEvidence,
   attachNewsEvidence,
@@ -36,7 +37,7 @@ import type { FedPressItem, FomcMeeting } from "@/domain/fed-parse";
 import { ADVISORY_LIMITS, BOLLINGER_ADAPTATION, TC2000_BOUNDARY } from "@/domain/limits";
 import type { NewsDraft } from "@/domain/news";
 import { checklistFor, fundamentalsFor, optionFor } from "@/domain/state";
-import { describeSession, isSessionDate } from "@/domain/time";
+import { describeSession, easternLocalToIso, formatInstantEt, isSessionDate } from "@/domain/time";
 import { instrumentFor } from "@/domain/watchlist";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { ChecklistRail } from "@/components/checklist-rail";
@@ -50,10 +51,33 @@ import { useTicker } from "@/components/use-ticker";
 import { useWorkspace } from "@/components/use-workspace";
 import { useXStatus } from "@/components/use-x";
 import { WatchlistBar } from "@/components/watchlist-bar";
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { readDirection } from "@/domain/direction";
+import { LIVE_NOTE } from "@/domain/session-clock";
+import { useAlertSound } from "@/components/use-alert-sound";
+import { useLive, type LiveState } from "@/components/use-live";
+import { candlesToBarObservations, type Timeframe } from "@/domain/bars";
+import { ChainPanel } from "@/components/chain-panel";
+import { DirectionPanel } from "@/components/direction-panel";
+import { PriceChart } from "@/components/price-chart";
+import { fetchBars, useBars } from "@/components/use-bars";
+import { useChain } from "@/components/use-chain";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { diffReads, narrate, type AnalysisEvent } from "@/domain/analysis";
+import { contractCandidate } from "@/domain/candidate";
+import { PULSE_SYMBOLS, pulseRow } from "@/domain/pulse";
+import { applyQuoteToCandles, PROVIDER_LABEL, stampAge, type QuoteProvider } from "@/domain/quote";
+import { classifyFreshness } from "@/domain/freshness";
+import { eventRisk } from "@/domain/wire";
+import { AnalysisLog } from "@/components/analysis-log";
+import { CandidatePanel, useAccountSize } from "@/components/candidate-panel";
+import { PulseStrip } from "@/components/pulse-strip";
+import { usePulse } from "@/components/use-pulse";
+import { useQuote } from "@/components/use-quote";
+import { useWire } from "@/components/use-wire";
+import { WirePanel } from "@/components/wire-panel";
 
 export function Desk() {
   const workspace = useWorkspace();
@@ -61,6 +85,60 @@ export function Desk() {
   const x = useXStatus();
   const { state, ready, now, sessionDate } = workspace;
   const ticker = useTicker(state?.selectedSymbol ?? "TSLA");
+  const bars = useBars(state?.selectedSymbol ?? "TSLA");
+  const [chainOpen, setChainOpen] = useState(false);
+  const chain = useChain(state?.selectedSymbol ?? "TSLA", chainOpen);
+  const [timeframe, setTimeframe] = useState<Timeframe>("15m");
+  const [loadingTape, setLoadingTape] = useState(false);
+  const tapeLoader = useRef<((quiet: boolean) => Promise<void>) | null>(null);
+  const tickCount = useRef(0);
+  const liveSymbol = state?.selectedSymbol ?? "TSLA";
+  const { live, setOn: setLiveOn, refreshNow } = useLive(() => {
+    tickCount.current += 1;
+    bars.refresh();
+    if (live.phase === "regular" || live.phase === "pre") void tapeLoader.current?.(true);
+    if (chainOpen && tickCount.current % 3 === 0) chain.refresh();
+  }, liveSymbol);
+  const sound = useAlertSound();
+  const [alert, setAlert] = useState<{ symbol: string; trigger: "call" | "put"; at: string } | null>(null);
+  const quote = useQuote(liveSymbol, live.on);
+  const pulse = usePulse(live.on);
+  const wire = useWire();
+  const wireTick = useRef(0);
+  useEffect(() => {
+    if (!live.lastTickAt) return;
+    wireTick.current += 1;
+    if (wireTick.current % 4 === 0) wire.refresh();
+  }, [live.lastTickAt, wire]);
+  const liveCandles = useMemo(
+    () => ({
+      "15m": applyQuoteToCandles(bars.candles["15m"], quote.quote, 900),
+      "1h": applyQuoteToCandles(bars.candles["1h"], quote.quote, 3600),
+      "1d": applyQuoteToCandles(bars.candles["1d"], quote.quote, 86_400),
+    }),
+    [bars.candles, quote.quote],
+  );
+  const read = useMemo(() => readDirection(liveCandles), [liveCandles]);
+  const entryTrigger = read.entry.trigger;
+  const [events, setEvents] = useState<AnalysisEvent[]>([]);
+  const prevRead = useRef<{ symbol: string; read: typeof read | null }>({ symbol: liveSymbol, read: null });
+  useEffect(() => {
+    if (read.reads["15m"].bars === 0) return;
+    const prev = prevRead.current.symbol === liveSymbol ? prevRead.current.read : null;
+    const fresh = diffReads(prev, read, liveSymbol, new Date().toISOString());
+    if (fresh.length) setEvents((current) => [...fresh.reverse(), ...current].slice(0, 200));
+    prevRead.current = { symbol: liveSymbol, read };
+  }, [read, liveSymbol]);
+  const [accountSize, setAccountSize, accountRaw] = useAccountSize();
+  const lastTrigger = useRef<{ symbol: string; trigger: "call" | "put" | null }>({ symbol: liveSymbol, trigger: null });
+  useEffect(() => {
+    const prev = lastTrigger.current;
+    if (prev.symbol === liveSymbol && prev.trigger === null && entryTrigger !== null) {
+      setAlert({ symbol: liveSymbol, trigger: entryTrigger, at: new Date().toISOString() });
+      sound.play();
+    }
+    lastTrigger.current = { symbol: liveSymbol, trigger: entryTrigger };
+  }, [entryTrigger, liveSymbol, sound]);
 
   if (!ready || !state || !now || !sessionDate) {
     return (
@@ -83,6 +161,28 @@ export function Desk() {
   const earnings = state.earnings.filter((event) => event.symbol === symbol);
   const symbolEvent = nextSymbolEvent(state.earnings, symbol, sessionDate);
   const fomc = nextFomcDate(fed.result?.calendar.data ?? [], sessionDate, fed.failed ?? fed.result?.calendar.error ?? (fed.result ? null : "Not retrieved yet."));
+  const phase = live.phase;
+  const quoteAge = stampAge(quote.quote?.time ?? null, now, phase);
+  const quoteLine = quote.quote ? `${quote.quote.price.toFixed(2)} · ${PROVIDER_LABEL[quote.quote.provider]} · ${quoteAge.label}` : quote.failed ? `quote Unknown · ${quote.failed}` : "quote loading";
+  const barsAge = stampAge(bars.loads["15m"]?.meta?.regularMarketTime ?? null, now, phase);
+  const chainAge = chain.result?.state === "ok" ? stampAge(chain.result.timestamp ? easternTextToIso(chain.result.timestamp) : null, now, phase) : null;
+  const quotesBySymbol = new Map((pulse?.loads ?? []).filter((l) => l.state === "ok").map((l) => [l.symbol, l.state === "ok" ? l.quote : null]));
+  const pulseRows = PULSE_SYMBOLS.map((member) => pulseRow(member, member === symbol && quote.quote ? quote.quote : (quotesBySymbol.get(member) ?? null), member === symbol ? liveCandles["15m"] : null));
+  const pulseProviders = Object.fromEntries(PULSE_SYMBOLS.map((member) => [member, (member === symbol ? quote.quote : quotesBySymbol.get(member))?.provider])) as Record<string, QuoteProvider | undefined>;
+  const wireItems = wire.result?.items ?? [];
+  const risk = eventRisk({
+    sessionDate,
+    fomcDate: fomc.state === "dated" ? fomc.meeting.startDate : null,
+    fomcKnown: fomc.state === "dated",
+    earningsDate: symbolEvent.state === "recorded" ? symbolEvent.date : null,
+    namedFreshCount: wireItems.filter((item) => item.symbols.includes(symbol) && classifyFreshness(item.publishedAt, null, now).freshness === "fresh").length,
+    macroFreshCount: wireItems.filter((item) => item.macroCue !== null && classifyFreshness(item.publishedAt, null, now).freshness === "fresh").length,
+  });
+  const candidate = contractCandidate({
+    read,
+    chain: chain.result?.state === "ok" ? { underlying: chain.result.underlying, contracts: chain.result.contracts, retrievedAt: chain.result.retrievedAt } : null,
+    accountSize,
+  });
 
   function applyReview(itemId: ChecklistItemId, review: ReviewMark) {
     workspace.apply(setReview(workspaceState, { symbol, sessionDate: sessionDate!, itemId, review, at: new Date().toISOString() }), "Review saved. Observation was not changed.");
@@ -146,6 +246,37 @@ export function Desk() {
     );
   }
 
+  async function loadTapeBars(quiet = false) {
+    const members = [...new Set(["SPY", "QQQ", "NVDA", symbol])];
+    if (loadingTape) return;
+    setLoadingTape(true);
+    try {
+      const loads = await Promise.allSettled(members.map((member) => fetchBars(member, "15m")));
+      const now = new Date();
+      const rows = loads.flatMap((load, index) =>
+        load.status === "fulfilled" && load.value.state === "ok"
+          ? candlesToBarObservations(load.value.candles, members[index], {
+              now,
+              retrievedAt: load.value.retrievedAt,
+              sourceLabel: "Yahoo chart (unofficial, delayed)",
+              delayNote: "Delayed aggregator bars. Not a live feed.",
+            })
+          : [],
+      );
+      const errors = loads.flatMap((load, index) =>
+        load.status === "rejected" ? [`${members[index]}: ${load.reason instanceof Error ? load.reason.message : "failed"}`] : load.value.state === "error" ? [`${members[index]}: ${load.value.error}`] : [],
+      );
+      if (rows.length === 0) {
+        if (!quiet) workspace.setNotice(errors.join(" ") || "No bars came back.");
+      } else if (quiet) workspace.apply(importParticipationBars(workspaceState, { bars: rows }), workspace.notice ?? undefined);
+      else workspace.apply(importParticipationBars(workspaceState, { bars: rows }), `${rows.length} delayed 15-minute bars loaded for ${members.join(", ")}. Typed bars with the same window were replaced.${errors.length ? ` ${errors.join(" ")}` : ""}`);
+    } finally {
+      setLoadingTape(false);
+    }
+  }
+
+  tapeLoader.current = loadTapeBars;
+
   return (
     <>
       <a className="skip" href="#feed">Skip to headlines</a>
@@ -166,9 +297,33 @@ export function Desk() {
           )
         }
         help={<HelpCopy />}
+        live={live}
+        liveRetrievedAt={bars.retrievedAt}
+        quoteLine={`${symbol} ${quoteLine}`}
+        onLiveToggle={() => setLiveOn(!live.on)}
+        onRefreshNow={refreshNow}
+        soundOn={sound.enabled}
+        onSoundToggle={sound.toggle}
         contract={
           <OptionsPanel
             symbol={symbol}
+            chain={
+              <ChainPanel
+                symbol={symbol}
+                chain={chain.result}
+                loading={chain.loading}
+                failed={chain.failed}
+                enabled={chainOpen}
+                onEnable={() => setChainOpen(true)}
+                onRefresh={chain.refresh}
+                onUse={(pick) =>
+                  workspace.apply(
+                    setOptionCapture(state, symbol, sessionDate, { ...capture, ...pick }, new Date().toISOString()),
+                    "Cboe delayed quote copied into the capture. Debit, multiplier, contracts, and stop are still yours. Not an order.",
+                  )
+                }
+              />
+            }
             capture={capture}
             formula={state.spreadFormula}
             onCapture={(next) => workspace.apply(setOptionCapture(state, symbol, sessionDate, next, new Date().toISOString()))}
@@ -202,6 +357,16 @@ export function Desk() {
           </>
         }
       />
+      {alert ? (
+        <div className="entry-banner" role="alert">
+          <div className="band">
+            <p>
+              <strong>{alert.symbol} · your 15-minute entry conditions are present for a {alert.trigger.toUpperCase()}</strong> · {formatInstantEt(alert.at)}. Delayed bars. Confirm the bands, averages, and candle in TC2000. Noticia mata estrategia: check Fed and earnings first. This is not an order.
+            </p>
+            <Button type="button" variant="outline" onClick={() => setAlert(null)}>Dismiss</Button>
+          </div>
+        </div>
+      ) : null}
       {state.demo ? (
         <div className="demo-banner" role="status">
           <p>{DEMO_BANNER}</p>
@@ -244,10 +409,36 @@ export function Desk() {
             </details>
           ) : null}
         </div>
+        <PulseStrip rows={pulseRows} providers={pulseProviders} selected={symbol} now={now} phase={phase} onSelect={(next) => workspace.apply(selectSymbol(state, next))} />
         <p className="notice" role="status">{workspace.notice ?? ""}</p>
       </div>
       <div className="desk">
+        <section className="panel chart-panel" aria-labelledby="chart-title">
+          <h2 id="chart-title" className="sr-only">Delayed chart</h2>
+          <PriceChart symbol={symbol} candlesByTf={liveCandles} timeframe={timeframe} onTimeframe={setTimeframe} stampLine={`Bars: Yahoo chart, ${barsAge.label}. Last bar carries the quote.`} />
+        </section>
+        <DirectionPanel symbol={symbol} candlesByTf={liveCandles} loading={bars.loading} failed={bars.failed} retrievedAt={bars.retrievedAt} onRefresh={bars.refresh} />
+        <CandidatePanel
+          symbol={symbol}
+          candidate={candidate}
+          chainLoaded={chainOpen && chain.result?.state === "ok"}
+          chainLoading={chain.loading}
+          chainAge={chainAge}
+          quoteLine={quoteLine}
+          accountRaw={accountRaw}
+          onAccount={setAccountSize}
+          onLoadChain={() => setChainOpen(true)}
+          onUse={(pick) =>
+            workspace.apply(
+              setOptionCapture(state, symbol, sessionDate, { ...capture, ...pick, sourceTimestampLocal: chain.result?.timestamp ? chain.result.timestamp.replace(" ", "T").slice(0, 16) : capture.sourceTimestampLocal }, new Date().toISOString()),
+              "Candidate quote copied into the capture. Debit, multiplier, contracts, and stop are still yours. Not an order.",
+            )
+          }
+        />
+        <AnalysisLog symbol={symbol} lines={narrate(read)} events={events.filter((event) => event.symbol === symbol)} stampLine={quoteLine} onClear={() => setEvents([])} />
         <ParticipationPanel
+          loadingBars={loadingTape}
+          onLoadBars={loadTapeBars}
           symbol={symbol}
           sessionDate={sessionDate}
           book={state.participation}
@@ -266,6 +457,23 @@ export function Desk() {
           setupError={workspace.notice && /not guessed|leave the field blank/.test(workspace.notice) ? workspace.notice : null}
         />
         <ContextFeed
+          wire={
+            <WirePanel
+              symbol={symbol}
+              wire={wire.result}
+              failed={wire.failed}
+              loading={wire.loading}
+              now={now}
+              risk={risk}
+              onRefresh={wire.refresh}
+              onAttach={(item) =>
+                workspace.apply(
+                  attachWireEvidence(state, { symbol, sessionDate, item, evidenceId: crypto.randomUUID(), at: new Date().toISOString(), retrievedAt: wire.result?.retrievedAt ?? new Date().toISOString() }),
+                  "Wire title attached. Review and observation were not changed. This is not a permission to trade.",
+                )
+              }
+            />
+          }
           symbol={symbol}
           items={library}
           demo={state.demo}
@@ -319,6 +527,13 @@ export function Desk() {
   );
 }
 
+/** Cboe stamps are Eastern wall clock text like "2026-11-16 15:59:58". */
+function easternTextToIso(text: string): string | null {
+  const local = text.trim().replace(" ", "T").slice(0, 16);
+  const result = easternLocalToIso(local);
+  return result.ok ? result.iso : null;
+}
+
 function Mast({
   sessionDate,
   nowLabel,
@@ -327,6 +542,13 @@ function Mast({
   help,
   sources,
   contract,
+  live,
+  liveRetrievedAt,
+  quoteLine,
+  onLiveToggle,
+  onRefreshNow,
+  soundOn,
+  onSoundToggle,
 }: {
   sessionDate: string;
   nowLabel: string;
@@ -335,6 +557,13 @@ function Mast({
   help?: ReactNode;
   sources?: ReactNode;
   contract?: ReactNode;
+  live?: LiveState;
+  liveRetrievedAt?: string | null;
+  quoteLine?: string;
+  onLiveToggle?: () => void;
+  onRefreshNow?: () => void;
+  soundOn?: boolean;
+  onSoundToggle?: () => void;
 }) {
   return (
     <header className="mast">
@@ -344,6 +573,18 @@ function Mast({
             <p className="eyebrow">Unpublished local draft</p>
             <h1>Context desk</h1>
             {nowLabel ? <p className="now-line">Eastern now {nowLabel}</p> : null}
+            {live ? (
+              <p className="live-line mono" title={LIVE_NOTE}>
+                <span className={live.on ? `live-dot live-${live.phase}` : "live-dot live-paused"} aria-hidden="true">●</span>{" "}
+                {live.on ? `Live · ${live.phase} · every ${Math.round(live.intervalMs / 1000)}s · next in ${live.nextInSeconds}s` : "Paused"}
+                {liveRetrievedAt ? ` · bars read ${formatInstantEt(liveRetrievedAt)}` : ""}
+              </p>
+            ) : null}
+            {quoteLine ? (
+              <p className="live-line mono quote-line">
+                {quoteLine}
+              </p>
+            ) : null}
           </div>
           {sessionDate ? (
             <div className="session-controls">
@@ -353,6 +594,17 @@ function Mast({
               </label>
               <Button type="button" variant="outline" onClick={() => onSession("")}>Today (ET)</Button>
               {onReset ? <ResetControl sessionDate={sessionDate} onReset={onReset} /> : null}
+              {live && onLiveToggle ? (
+                <Button type="button" variant={live.on ? "default" : "outline"} onClick={onLiveToggle} aria-pressed={live.on}>
+                  {live.on ? "Live on" : "Live off"}
+                </Button>
+              ) : null}
+              {live && onRefreshNow ? <Button type="button" variant="outline" onClick={onRefreshNow}>Refresh now</Button> : null}
+              {onSoundToggle ? (
+                <Button type="button" variant={soundOn ? "default" : "outline"} onClick={onSoundToggle} aria-pressed={!!soundOn}>
+                  {soundOn ? "Sound on" : "Sound off"}
+                </Button>
+              ) : null}
               {help ? <Drawer label="Help" title="How the marks work">{help}</Drawer> : null}
               {sources ? <Drawer label="Sources" title="Sources, calendar, and company notes" wide>{sources}</Drawer> : null}
               {contract ? <Drawer label="Contract" title="Exact contract, after the look" wide>{contract}</Drawer> : null}
@@ -408,7 +660,7 @@ function HelpCopy() {
         Arrow keys move the watchlist when you are not typing in a field. Keys 1 through 9 jump the full list in order. The contract calculator stays in Contract and is not required before the headlines or the tape.
       </p>
       <p>
-        Block compares SPY, QQQ, and NVDA with the symbol you selected, on one completed 15-minute window and from the 09:30 open. Same, opposite, and mixed are signs only. That comparison was requested. The Academy notes do not define which names share a block or who leads. Index weights, correlation, breadth, and lead/lag are not calculated. NVDA is a comparison symbol, not a watchlist name. Bars are manual.
+        Block compares SPY, QQQ, and NVDA with the symbol you selected, on one completed 15-minute window and from the 09:30 open. Same, opposite, and mixed are signs only. That comparison was requested. The Academy notes do not define which names share a block or who leads. Index weights, correlation, breadth, and lead/lag are not calculated. NVDA is both a watchlist name and a block member. Bars are typed, imported, or loaded from the delayed bars reader.
       </p>
       <p>Orders stay on the Thinkorswim phone. Nothing here is an entry.</p>
     </>
